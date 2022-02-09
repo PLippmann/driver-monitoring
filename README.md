@@ -32,3 +32,5 @@ TODO
 Change Town04 to have proper onramp
 
 Review mirror alignment and look into vehicle with larger mirror surface to replace 
+
+Figure out loop in UE4
