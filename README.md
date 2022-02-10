@@ -25,6 +25,7 @@ Running a simulation
 7. In the shell, execute the python client of your choice
 8. In case you use a UE4 based simulation: click on the preview window in UE4 once the client is initialised and press X on your keyboard to attach the camera to the ego vehicle
 
+NOTE: The changes made to Town_04 include the addition of the first person camera as a pawn, some backend logic to make this useable, as well as minor tweaks to make the map a more realistic driving experience. Further the vehicle blueprint to be used must have a working mirror. Such a mirror can be added to most cars through following the procedure outlined in `CarlaMirrorTutorial.pdf`.
 
 
 TODO
