@@ -693,7 +693,7 @@ class DMCarlaClient():
             self.n_routes_per_session = 4
 
             self.set_ff_gain()
-            #self.initialize_log()
+            self.initialize_log()
             self.client = carla.Client('localhost', 2000)
             self.client.set_timeout(2.0)
             pygame.init()
@@ -744,18 +744,16 @@ class DMCarlaClient():
         return tta_values
 
     def initialize_log(self):
-        log_directory = '../data'
-        self.log_file_path = os.path.join(log_directory, str(self.exp_info['subj_id']) + '_' +
-                                                         str(self.exp_info['session']) + '_' +
-                                                         self.exp_info['start_time'] + '.txt')
-        with open(self.log_file_path, 'w') as fp:
+        log_directory = 'C:/carla/carla/PythonAPI/examples/data'
+        self.log_file_path = log_directory + '/' + str(self.exp_info['subj_id']) + '.txt'
+        print(self.log_file_path)
+        with open(self.log_file_path, 'w+') as fp:
             writer = csv.writer(fp, delimiter = '\t')
-            writer.writerow(['subj_id', 'session', 'route', 'intersection_no',
-                             'intersection_x', 'intersection_y','turn_direction', 't',
-                             'ego_distance_to_intersection', 'tta_condition', 'd_condition', 'v_condition',
+            writer.writerow(['subj_id', 't',
+                             'ego_distance_to_end', 'ego_distance_to_bot', 'tta_condition', 'd_condition', 'v_condition',
                              'ego_x', 'ego_y', 'ego_vx', 'ego_vy', 'ego_ax', 'ego_ay', 'ego_yaw',
                              'bot_x', 'bot_y', 'bot_vx', 'bot_vy', 'bot_ax', 'bot_ay', 'bot_yaw',
-                             'throttle', 'brake', 'steer'])
+                             'throttle', 'brake', 'steer', 'merge'])
 
     def write_log(self, log):
         with open(self.log_file_path, 'a') as fp:
@@ -901,16 +899,8 @@ class DMCarlaClient():
             track = Tracking()
             webcam = cv2.VideoCapture('obama.webm')
 
-            hud = HUD(1, 1)
-            world = World(sim_world, hud, args)
-            #--------------------------------------------------
-            #controller = KeyboardControl(world, True)
-            #sim_world.wait_for_tick()
-            #clock = pygame.time.Clock()
-            #clock.tick_busy_loop(60)
-            #if controller.parse_events(client, world, clock, False):
-            #    return
-            #world.tick(clock)
+            #hud = HUD(1, 1)
+            #world = World(sim_world, hud, args)
 
 
             for i in range(first_route, self.n_routes_per_session+1):
@@ -925,103 +915,110 @@ class DMCarlaClient():
                 time.sleep(5)
                 self.spawn_bot()
 
-                self.initialize_noise_sound() #took off
+                #self.initialize_noise_sound() #took off
                 # in the first session, we go through routes 1 to 4, in the second session, routes 5 to 8
                 route_number = i + (self.exp_info['session']-1)*self.n_routes_per_session
                 # in the path input file, -1 is turn right, 1 is turn left, 0 is go straight
                 route = np.loadtxt(os.path.join('routes', 'route_%i.txt' % (route_number)))
                 tta = tta_values[-1]
-                for j, current_turn in enumerate(route):
-                    # if the current turn is left, set TTA for this trial
-                    # and drop the current TTA value from the list
-                    # the same TTA will be used for next trials until there's another left turnx
-                    if (current_turn==1):
-                        tta = tta_values[-1]
-                        tta_values = tta_values[:-1]
 
-                    # distance to the center of the ego car
-                    d_condition = random.choice(self.bot_distance_values)
-                    bot_speed = d_condition/tta
+                # distance to the center of the ego car
+                d_condition = random.choice(self.bot_distance_values)
+                bot_speed = d_condition/tta
 
-                    is_turn_completed = False
-                    is_at_active_intersection = False
-                    is_first_cue_played = False
-                    is_second_cue_played = False
+                # whenever we exchange y-coordinates with Carla server, we invert the sign
+                end_highway = carla.Location(x=20.0, y=0.0, z=0.0)
+                trial_log = []
+                trial_start_time = time.time()
 
-                    intersection_coordinates = (self.active_intersection[0]*self.block_size,
-                                                self.active_intersection[1]*self.block_size)
+                print ('TTA %f, bot speed %f, distance %f' %
+                            (tta, bot_speed, d_condition))
 
-                    # whenever we exchange y-coordinates with Carla server, we invert the sign
-                    active_intersection_loc = carla.Location(x=intersection_coordinates[0],
-                                                             y=-intersection_coordinates[1],
-                                                             z=0.0)
-                    trial_log = []
-                    trial_start_time = time.time()
+                count = 0
+                target_count = 10
+                while count < target_count:
+                    #GAZE###############################################################################
+                    _, frame = webcam.read()
+                    track.refresh(frame)
+                    frame = track.annotated_frame()
+                    label = ""
 
-                    print ('Current trial: %i, turn %f, TTA %f, bot speed %f, distance %f' %
-                            (j+1, current_turn, tta, bot_speed, d_condition))
+                    if track.mid_check() and track.mid_check_H():
+                        label = "Road"
+                    elif track.positive_x_check():
+                        label = "Left mirror"
+                    elif track.negative_x_check():
+                        label = "Right mirror"
+                    elif track.positive_y_check():
+                        label = "Rear view mirror"
+                    elif track.negative_y_check():
+                        label = "Center stack"
+                    else:
+                        label = "Blinking or NaN"
 
-                    while not is_turn_completed:
-                        t = time.time()-trial_start_time
-                        speed = 20#np.sqrt(self.ego_actor.get_velocity().x**2 + self.ego_actor.get_velocity().y**2)
-                        ego_distance_to_intersection = 20#self.ego_actor.get_location().distance(active_intersection_loc)
+                    print("LABEL: ", label)
+                    ####################################################################################
+
+                    ####################################################################################
+                    tf = self.ego_actor.get_transform()
+                    if tf.location.x > -60.0:
+                        d_remain = 75.0 - tf.location.x
+                    else:
+                        d_remain = 150.0
+
+
+                    if tf.location.y > 36.0:
+                        merge = 0
+                    else:
+                        merge = 1
+                    ####################################################################################
+                    if self.ego_actor.get_location().x > 10:
+                        self.ego_actor.set_autopilot(False)  #remove autopilot at begin of merge
+
+                    t = time.time()-trial_start_time
+                    speed = np.sqrt(self.ego_actor.get_velocity().x**2 + self.ego_actor.get_velocity().y**2)
+                    ego_distance_to_end = self.ego_actor.get_location().distance(end_highway)  #distance to end of highway
+                    ego_distance_to_bot = self.ego_actor.get_location().distance(self.bot_actor.get_location())
+                    '''
+                    'subj_id', 't', 'ego_distance_to_end', 'tta_condition', 'd_condition', 'v_condition'
+                    '''
+                    values_to_log = list(['%i' % value for value in
+                                          [self.exp_info['subj_id']]]) \
+                                  + list(['%.4f' % value for value in
+                                          [t, ego_distance_to_end, ego_distance_to_bot, tta, d_condition, bot_speed]]) \
+                                  + list(['%i' % value for value in
+                                          [merge]])
+
+                    self.update_log(trial_log, values_to_log)
+                    self.write_log(trial_log)  #TODO remove later when repeat works
+                    self.update_ego_control()
+
+                    if not self.bot_actor is None:
+                        self.update_bot_control(bot_speed)
+
+
+                    #---------------------------------------------
+
                         '''
-                        'subj_id', 'session', 'route', 'intersection_no',
-                        'intersection_x', 'intersection_y', 'turn_direction', 't',
-                        'ego_distance_to_intersection', 'tta_condition', 'd_condition', 'v_condition'
+                        if tf.x > xx or tf.y > xx:
+                            set autopilot = false
                         '''
-                        values_to_log = list(['%i' % value for value in
-                                          [self.exp_info['subj_id'], self.exp_info['session'], route_number, j+1,
-                                         intersection_coordinates[0], intersection_coordinates[1], current_turn] ]) \
-                                      + list(['%.4f' % value for value in
-                                          [t, ego_distance_to_intersection, tta, d_condition, bot_speed]])
-
-                        self.update_log(trial_log, values_to_log)
-
-                        self.update_ego_control()
-
-                        if not self.bot_actor is None:
-                            pass#self.update_bot_control(bot_speed)
-
-                        self.noise_sound.set_volume(0.05 + speed/20) #took off
-
-                        if((not is_first_cue_played) & (ego_distance_to_intersection<(4/5)*self.block_size)):
-                            self.play_sound_cue(1, current_turn)
-                            is_first_cue_played = True
-                        # When the driver approaches the intersection, we play the second sound cue and destroy the bot at the previous intersection
-                        elif((not is_second_cue_played) & (ego_distance_to_intersection<(1/5)*self.block_size)):
-                            self.play_sound_cue(2, current_turn)
-                            is_second_cue_played = True
-                        elif((not is_at_active_intersection) & (ego_distance_to_intersection<10)):
-                            is_at_active_intersection = True
-                        # if at the left turn, wait until almost a full stop before spawning a bot
-                        elif((current_turn==1) & (is_at_active_intersection) & (speed<1) &
-                                                                        (self.bot_actor is None)):
-                            self.spawn_bot(distance_to_intersection=d_condition-ego_distance_to_intersection,
-                                           speed=bot_speed)
-                        # if at the right turn, don't wait for slowdown when spawning a bot
-                        elif((current_turn==-1) & (is_at_active_intersection) & (self.bot_actor is None)):
-                            self.spawn_bot(75, bot_speed)
-                        # When the driver leaves the intersection we designate the next intersection as active and destroy the bot
-                        elif((is_at_active_intersection) & (ego_distance_to_intersection>10)):
-                            print('updating origin and active intersection')
-                            current_direction = self.active_intersection - self.origin
-                            print(current_direction)
-                            new_origin = self.active_intersection
-                            print(new_origin)
-                            new_active_intersection = (self.active_intersection +
-                                            self.rotate(current_direction, np.pi/2*current_turn))
-                            print(new_active_intersection)
-                            self.origin = new_origin
-                            self.active_intersection = new_active_intersection
-
-                            if (not (self.bot_actor is None)):
+                        '''
+                        if tf.x > 20 or tf.y > 1000:
+                            if (not (self.ego_actor is None)):
+                                self.ego_actor.destroy()
+                                self.ego_actor = None
+                                print("spawning...")
+                                self.spawn_ego_car()
                                 self.bot_actor.destroy()
                                 self.bot_actor = None
+                                self.spawn_bot()
+                                print("spawned!")
+                                count += 1
+                        '''
 
-                            is_turn_completed = True
 
-                        time.sleep(0.01)
+                    time.sleep(0.01)
 
                     self.write_log(trial_log)
 
@@ -1042,6 +1039,7 @@ class DMCarlaClient():
                 actor.destroy()
             if world is not None:
                 world.destroy()
+
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -1102,6 +1100,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
 
